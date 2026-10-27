@@ -27,6 +27,15 @@ def ok(name):
     print(f"  PASS  {name}")
 
 
+async def agent_recv(ws, timeout=3):
+    """读 Agent 侧消息，跳过中枢心跳。"""
+    while True:
+        msg = json.loads(await asyncio.wait_for(ws.recv(), timeout))
+        if msg.get("t") == "ping":
+            continue
+        return msg
+
+
 async def test_auth_rejected():
     try:
         async with websockets.connect(f"{WS}/ws/remote?token=wrong") as ws:
@@ -37,8 +46,12 @@ async def test_auth_rejected():
         ok("错误令牌被拒绝 (4401)")
 
 
+AID = "pc-relay-test"
+
+
 async def test_relay_and_release():
-    agent = await websockets.connect(f"{WS}/ws/agent?token={TOKEN}")
+    agent = await websockets.connect(
+        f"{WS}/ws/agent?token={TOKEN}&id={AID}&name=中继测试机")
     remote = await websockets.connect(f"{WS}/ws/remote?token={TOKEN}")
 
     # 远端连上后应立即收到 agent_status
@@ -47,31 +60,52 @@ async def test_relay_and_release():
     ok("Agent 上线 -> 远端收到 agent_status")
 
     # key_down 转发
-    await remote.send(json.dumps({"t": "key_down", "key": "w"}))
-    msg = json.loads(await asyncio.wait_for(agent.recv(), 3))
+    await remote.send(json.dumps({"t": "key_down", "key": "w", "target": AID}))
+    msg = await agent_recv(agent)
     assert msg == {"t": "key_down", "key": "w"}, msg
     ok("远端 key_down 转发到 Agent")
 
     # key_tap 转发
-    await remote.send(json.dumps({"t": "key_tap", "key": "c", "mods": ["ctrl"]}))
-    msg = json.loads(await asyncio.wait_for(agent.recv(), 3))
+    await remote.send(json.dumps({"t": "key_tap", "key": "c", "mods": ["ctrl"], "target": AID}))
+    msg = await agent_recv(agent)
     assert msg["t"] == "key_tap" and msg["mods"] == ["ctrl"], msg
     ok("组合键 key_tap 转发")
 
     # 远端断开 -> Agent 先收到逐键 key_up，再收到 release_all 兜底
     await remote.close()
-    msg = json.loads(await asyncio.wait_for(agent.recv(), 3))
+    msg = await agent_recv(agent)
     assert msg == {"t": "key_up", "key": "w"}, msg
-    msg = json.loads(await asyncio.wait_for(agent.recv(), 3))
+    msg = await agent_recv(agent)
     assert msg == {"t": "release_all"}, msg
     ok("远端断开 -> key_up + release_all 双重兜底（防按键卡死）")
 
     await agent.close()
-    # 等 Agent 离线广播（无远端在线，直接验证新远端收到的初始状态）
+
+    # 等中枢真正把这个 id 标成离线（WebSocket close 是异步的）
+    offline = False
+    for _ in range(50):
+        try:
+            r = urllib.request.urlopen(urllib.request.Request(
+                f"{BASE}/api/devices", headers={"X-Token": TOKEN}))
+            pcs = json.loads(r.read())["pcs"]
+            if not any(p["id"] == AID and p["online"] for p in pcs):
+                offline = True
+                break
+        except Exception:
+            pass
+        await asyncio.sleep(0.1)
+    assert offline, "Agent 断开后仍然是 online"
+
     remote2 = await websockets.connect(f"{WS}/ws/remote?token={TOKEN}")
-    status = json.loads(await asyncio.wait_for(remote2.recv(), 3))
-    assert status["online"] is False, status
-    ok("Agent 离线 -> 新远端收到 offline 状态")
+    devices_msg = None
+    for _ in range(3):
+        msg = json.loads(await asyncio.wait_for(remote2.recv(), 3))
+        if msg.get("t") == "devices":
+            devices_msg = msg
+            break
+    assert devices_msg is not None, "新远端没收到设备表"
+    assert not any(p["id"] == AID and p["online"] for p in devices_msg["pcs"]), devices_msg
+    ok("Agent 离线 -> 新远端看到的设备表里它已标记离线")
     await remote2.close()
 
 

@@ -68,8 +68,14 @@ async def ws_test():
     first = json.loads(await asyncio.wait_for(remote.recv(), 3))
     assert first["t"] == "agent_status", first
     await remote.send(json.dumps({"t": "adb", "action": {"kind": "key", "key": "dpad_up"}}))
-    msg = json.loads(await asyncio.wait_for(remote.recv(), 5))
-    assert msg["t"] == "tv_result" and msg["ok"] is False, msg
+    # 远端还会收到 devices 等广播，跳过它们只找 tv_result
+    msg = None
+    for _ in range(5):
+        cand = json.loads(await asyncio.wait_for(remote.recv(), 5))
+        if cand.get("t") == "tv_result":
+            msg = cand
+            break
+    assert msg is not None and msg["ok"] is False, msg
     ok("WS adb 指令 -> 中枢本地执行并回 tv_result")
     await remote.close()
 

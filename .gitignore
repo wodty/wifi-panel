@@ -25,3 +25,6 @@ android/.idea/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Agent 的稳定设备 id（每台电脑自己的，不进仓库）
+agent/.agent_id

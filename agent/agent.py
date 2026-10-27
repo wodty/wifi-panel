@@ -4,24 +4,62 @@
 接收动作指令并用 pynput 注入鼠标键盘事件。
 
 用法：
-  python agent.py [ws://hub:8765/ws/agent] [token]
+  python agent.py [ws://hub:8765/ws/agent] [token] [--name 客厅主机] [--id pc-xxxxxx]
 环境变量：
   PANEL_URL    中枢地址（默认 ws://localhost:8765/ws/agent）
   PANEL_TOKEN  访问令牌（默认 panel123）
+  PANEL_NAME   设备显示名（默认取主机名）
+  PANEL_ID     设备唯一 id（默认自动生成并保存到 agent/.agent_id）
+
+多台电脑：每台电脑的 id 不同，中枢会把它们当成不同设备，
+手机上可以分别选「客厅主机 / 书房主机」，也可以用「全部电脑」一起发指令。
 """
+import argparse
 import asyncio
 import json
 import os
 import platform
 import re
-import sys
+import uuid
+from pathlib import Path
+from urllib.parse import quote
 
 import websockets
 from pynput.keyboard import Controller as Keyboard, Key, KeyCode
 from pynput.mouse import Button, Controller as Mouse
 
-HUB = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("PANEL_URL", "ws://localhost:8765/ws/agent")
-TOKEN = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("PANEL_TOKEN", "panel123")
+ID_FILE = Path(__file__).resolve().parent / ".agent_id"
+
+
+def _load_or_make_id() -> str:
+    """设备 id 必须跨重启稳定，否则每次重连在中枢看来都是新设备。"""
+    try:
+        if ID_FILE.exists():
+            saved = ID_FILE.read_text(encoding="utf-8").strip()
+            if re.fullmatch(r"[A-Za-z0-9_-]{1,32}", saved):
+                return saved
+        made = "pc-" + uuid.uuid4().hex[:6]
+        ID_FILE.write_text(made, encoding="utf-8")
+        return made
+    except Exception:
+        return "pc-" + uuid.uuid4().hex[:6]
+
+
+def _parse_args():
+    ap = argparse.ArgumentParser(description="wifi-panel PC Agent")
+    ap.add_argument("url", nargs="?", help="中枢地址，如 ws://192.168.1.10:8765/ws/agent")
+    ap.add_argument("token", nargs="?", help="访问令牌")
+    ap.add_argument("--name", help="设备显示名，如 客厅主机")
+    ap.add_argument("--id", help="设备唯一 id（默认自动生成）")
+    return ap.parse_args()
+
+
+ARGS = _parse_args()
+HUB = ARGS.url or os.environ.get("PANEL_URL", "ws://localhost:8765/ws/agent")
+TOKEN = ARGS.token or os.environ.get("PANEL_TOKEN", "panel123")
+AGENT_ID = (ARGS.id or os.environ.get("PANEL_ID") or _load_or_make_id()).strip()
+NAME = (ARGS.name or os.environ.get("PANEL_NAME") or platform.node() or AGENT_ID).strip()[:24]
+VERSION = "0.2"
 
 SPECIAL_KEYS = {
     "space": Key.space, "enter": Key.enter, "tab": Key.tab, "esc": Key.esc,
@@ -127,8 +165,10 @@ def handle(msg: dict) -> None:
 
 
 async def agent_loop() -> None:
-    url = f"{HUB}?token={TOKEN}"
+    url = (f"{HUB}?token={quote(TOKEN)}&id={quote(AGENT_ID)}"
+           f"&name={quote(NAME)}&platform={quote(platform.platform()[:60])}")
     backoff = 1
+    print(f"[agent] device: {NAME} ({AGENT_ID})")
     while True:
         try:
             async with websockets.connect(url, ping_interval=10, ping_timeout=10) as ws:
@@ -136,13 +176,19 @@ async def agent_loop() -> None:
                 print(f"[agent] connected: {HUB}")
                 await ws.send(json.dumps({
                     "t": "hello",
+                    "id": AGENT_ID,
+                    "name": NAME,
                     "platform": platform.platform(),
-                    "version": "0.1",
+                    "version": VERSION,
                 }))
                 async for raw in ws:
                     try:
                         msg = json.loads(raw)
                     except Exception:
+                        continue
+                    if isinstance(msg, dict) and msg.get("t") == "ping":
+                        # 中枢靠心跳判断这台电脑是不是真在线（睡眠/断网时会假在线）
+                        await ws.send(json.dumps({"t": "pong"}))
                         continue
                     try:
                         handle(msg)

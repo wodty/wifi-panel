@@ -175,5 +175,7 @@ def build(kind: str, pid: str, name: Optional[str] = None) -> dict:
         "name": name or tpl["name"],
         "template": tpl["kind"],
         "template_rev": REV,
+        # 面板绑定的目标设备（{"pc": "pc-xxx", "tv": "tv1"}），空 = 用默认设备
+        "targets": {},
         "elements": tpl["build"](),
     }

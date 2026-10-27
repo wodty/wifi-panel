@@ -38,6 +38,8 @@ const state = {
   sel: null,            // 选中的 element
   ws: null,
   wsTimer: null,
+  devices: { pcs: [], tvs: [] },   // 设备表快照（中枢推送 + /api/devices）
+  targets: { pc: "", tv: "" },     // 当前这次控制的目标；"" = 默认（自动选）
 };
 
 /* ---------- 视图切换 ---------- */
@@ -116,61 +118,266 @@ $("#btn-logout").addEventListener("click", () => {
   show("view-connect");
 });
 
-/* ---------- 电视设置 ---------- */
+/* ---------- 设备（多台电脑 / 多台电视）---------- */
 const TV_HINTS = {
   adb: "ADB：电视上开启 设置 → 关于 → 连点「版本号/软件版本」→ 开发者选项 → 网络调试。首次连接电视会弹授权，勾选「一律允许」。",
   samsung: "三星：首次连接电视会弹出「允许」提示，确认后令牌自动保存。",
-  lg: "LG webOS：首次连接电视屏幕会弹出「允许」，确认后配对密钥自动保存。",
+  lg: "LG webOS：首次连接电视会弹出「允许」，确认后配对密钥自动保存。",
 };
 const TV_DEFAULT_PORTS = { adb: 5555, samsung: 8001, lg: 3000 };
 
-async function tvSave() {
-  await api("/api/tv", { method: "PUT", body: {
-    ip: $("#tv-ip").value.trim(),
-    port: +$("#tv-port").value || TV_DEFAULT_PORTS[$("#tv-protocol").value],
-    protocol: $("#tv-protocol").value,
-  }});
+function pcList() { return state.devices.pcs || []; }
+function tvList() { return state.devices.tvs || []; }
+
+function devName(list, id) {
+  const found = (list || []).find((d) => d.id === id);
+  return found ? found.name : id;
+}
+function pcName(id) { return devName(pcList(), id); }
+function tvName(id) { return devName(tvList(), id); }
+
+/** 目标解析：按键级覆盖 > 顶部切换 > 面板绑定（打开面板时已折算进 state.targets） */
+function pcTarget(el) { return (el && el.target) || state.targets.pc || ""; }
+function tvTarget(el) { return (el && el.target) || state.targets.tv || ""; }
+
+/** 带目标发指令；target 为空就不带，服务端走默认设备（老中枢也能用） */
+function sendT(obj, target) {
+  if (target) obj.target = target;
+  send(obj);
 }
 
-$("#tv-protocol").addEventListener("change", () => {
-  $("#tv-protocol-hint").textContent = TV_HINTS[$("#tv-protocol").value] || "";
-  $("#tv-port").value = TV_DEFAULT_PORTS[$("#tv-protocol").value];
+function targetKey(pid) { return "wp_targets_" + pid; }
+
+function loadTargets(profile) {
+  const base = Object.assign({ pc: "", tv: "" }, profile.targets || {});
+  try {
+    const saved = JSON.parse(localStorage.getItem(targetKey(profile.id)) || "{}");
+    if (saved && typeof saved === "object") {
+      return {
+        pc: saved.pc != null ? saved.pc : base.pc,
+        tv: saved.tv != null ? saved.tv : base.tv,
+      };
+    }
+  } catch (_) { /* 本地存坏了就用面板默认 */ }
+  return base;
+}
+
+function saveTargets() {
+  if (!state.profile) return;
+  localStorage.setItem(targetKey(state.profile.id), JSON.stringify(state.targets));
+}
+
+async function loadDevices(refresh = false) {
+  try {
+    const d = await api("/api/devices" + (refresh ? "?refresh=1" : ""));
+    state.devices = { pcs: d.pcs || [], tvs: d.tvs || [] };
+    renderDeviceBar();
+    if (!$("#dev-sheet").hidden) renderDeviceList();
+  } catch (_) { /* 设备列表拿不到也不影响面板本身 */ }
+}
+
+function renderDeviceBar() {
+  const fill = (sel, list, allLabel, kind) => {
+    if (!sel) return;
+    const cur = state.targets[kind] || "";
+    const opts = ['<option value="">默认（自动）</option>'];
+    for (const d of list) {
+      const off = d.online === false ? "（离线）" : "";
+      opts.push(`<option value="${esc(d.id)}">${esc(d.name)}${off}</option>`);
+    }
+    opts.push(`<option value="*">${allLabel}</option>`);
+    sel.innerHTML = opts.join("");
+    if ([...sel.options].some((o) => o.value === cur)) {
+      sel.value = cur;
+    } else {
+      sel.value = "";
+      state.targets[kind] = "";
+    }
+  };
+  fill($("#sel-pc"), pcList(), "全部电脑", "pc");
+  fill($("#sel-tv"), tvList(), "全部电视", "tv");
+}
+
+function targetOptions(cur) {
+  const pc = pcList().map((p) =>
+    `<option value="${esc(p.id)}" ${cur === p.id ? "selected" : ""}>电脑 · ${esc(p.name)}</option>`).join("");
+  const tv = tvList().map((t) =>
+    `<option value="${esc(t.id)}" ${cur === t.id ? "selected" : ""}>电视 · ${esc(t.name)}</option>`).join("");
+  return `<option value="">跟随顶部切换</option>`
+    + (pc ? `<optgroup label="电脑">${pc}</optgroup>` : "")
+    + (tv ? `<optgroup label="电视">${tv}</optgroup>` : "")
+    + `<option value="*" ${cur === "*" ? "selected" : ""}>全部同类设备</option>`;
+}
+
+/* ---------- 设备管理弹层 ---------- */
+function devMsg(text) { $("#dev-msg").textContent = text || ""; }
+
+function devRow(id, name, sub, actions) {
+  const row = document.createElement("div");
+  row.className = "dev-item";
+  const dot = document.createElement("span");
+  dot.className = "dot " + (id.online ? "on" : "off");
+  const info = document.createElement("div");
+  info.className = "dev-info";
+  const n = document.createElement("div");
+  n.className = "dev-name";
+  n.textContent = name;
+  const subEl = document.createElement("div");
+  subEl.className = "dev-sub";
+  subEl.textContent = sub;
+  info.append(n, subEl);
+  row.append(dot, info);
+  for (const [label, fn] of actions) {
+    const b = document.createElement("button");
+    b.className = "small ghost";
+    b.textContent = label;
+    b.onclick = fn;
+    row.appendChild(b);
+  }
+  return { row, dot };
+}
+
+function renderDeviceList() {
+  const box = $("#dev-list");
+  box.innerHTML = "";
+
+  for (const p of pcList()) {
+    const { row, dot } = devRow(p, p.name || p.id,
+      `${p.online ? "在线" : "离线"} · 电脑${p.platform ? " · " + p.platform : ""}`,
+      [
+        ["改名", async () => {
+          const name = prompt("这台电脑叫什么？", p.name || p.id);
+          if (!name) return;
+          try {
+            await api("/api/devices/pc/" + encodeURIComponent(p.id), { method: "PUT", body: { name } });
+            await loadDevices();
+            devMsg("已改名");
+          } catch (e) { devMsg("改名失败：" + e.message); }
+        }],
+        ["移除", async () => {
+          if (!confirm(`移除「${p.name || p.id}」？下次它连上还会自动出现。`)) return;
+          try {
+            await api("/api/devices/pc/" + encodeURIComponent(p.id), { method: "DELETE" });
+            await loadDevices();
+          } catch (e) { devMsg("移除失败：" + e.message); }
+        }],
+      ]);
+    dot.classList.toggle("on", !!p.online);
+    box.appendChild(row);
+  }
+
+  for (const t of tvList()) {
+    const statusText = t.online === true ? "已连接" : (t.online === false ? "未连接" : "状态未知");
+    const { row, dot } = devRow(t, t.name || t.id,
+      `${(t.protocol || "adb").toUpperCase()} · ${t.ip || "未填 IP"}:${t.port} · ${statusText}`,
+      [
+        ["测试", async () => {
+          devMsg(`正在连接 ${t.name}…（首次连电视请到电视上点「允许」）`);
+          try {
+            const r = await api(`/api/devices/tv/${encodeURIComponent(t.id)}/connect`, { method: "POST" });
+            devMsg((r.ok ? "已连接：" : "连接失败：") + (r.msg || ""));
+          } catch (e) { devMsg("连接失败：" + e.message); }
+          await loadDevices(true);
+        }],
+        ["设置", () => openTvForm(t)],
+        ["删除", async () => {
+          if (!confirm(`删除电视「${t.name || t.id}」？`)) return;
+          try {
+            await api("/api/devices/tv/" + encodeURIComponent(t.id), { method: "DELETE" });
+            await loadDevices();
+            devMsg("已删除");
+          } catch (e) { devMsg("删除失败：" + e.message); }
+        }],
+      ]);
+    dot.classList.toggle("on", t.online === true);
+    box.appendChild(row);
+  }
+
+  if (!pcList().length && !tvList().length) {
+    box.innerHTML = '<p class="hint left">还没有设备。电脑上启动 Agent 会自动出现；电视点下面「+ 添加电视」。</p>';
+  }
+}
+
+function openTvForm(tv) {
+  const form = $("#dev-form");
+  form.hidden = false;
+  form.dataset.id = tv ? tv.id : "";
+  const proto = tv ? (tv.protocol || "adb") : "adb";
+  $("#dev-name").value = tv ? (tv.name || "") : "";
+  $("#dev-proto").value = proto;
+  $("#dev-ip").value = tv ? (tv.ip || "") : "";
+  $("#dev-port").value = tv ? (tv.port || TV_DEFAULT_PORTS[proto]) : TV_DEFAULT_PORTS.adb;
+  $("#dev-proto-hint").textContent = TV_HINTS[proto] || "";
+  devMsg("");
+}
+
+$("#dev-proto").addEventListener("change", () => {
+  const p = $("#dev-proto").value;
+  $("#dev-proto-hint").textContent = TV_HINTS[p] || "";
+  $("#dev-port").value = TV_DEFAULT_PORTS[p];
 });
 
-$("#btn-tv").addEventListener("click", async () => {
-  $("#tv-sheet").hidden = false;
-  $("#tv-status").textContent = "";
+$("#btn-devices").addEventListener("click", async () => {
+  $("#dev-sheet").hidden = false;
+  $("#dev-form").hidden = true;
+  devMsg("读取中…");
+  await loadDevices();
+  devMsg("");
+});
+
+$("#dev-close").addEventListener("click", () => { $("#dev-sheet").hidden = true; });
+$("#dev-sheet").addEventListener("click", (e) => {
+  if (e.target.id === "dev-sheet") $("#dev-sheet").hidden = true;
+});
+
+$("#dev-add-tv").addEventListener("click", () => openTvForm(null));
+$("#dev-cancel").addEventListener("click", () => { $("#dev-form").hidden = true; devMsg(""); });
+$("#dev-refresh").addEventListener("click", async () => {
+  devMsg("正在探测电视状态…");
+  await loadDevices(true);
+  devMsg("状态已刷新");
+});
+
+$("#dev-save").addEventListener("click", async () => {
+  const id = $("#dev-form").dataset.id;
+  const proto = $("#dev-proto").value;
+  const body = {
+    name: $("#dev-name").value.trim(),
+    protocol: proto,
+    ip: $("#dev-ip").value.trim(),
+    port: +$("#dev-port").value || TV_DEFAULT_PORTS[proto],
+  };
   try {
-    const s = await api("/api/tv");
-    $("#tv-protocol").value = s.cfg.protocol || "adb";
-    $("#tv-ip").value = s.cfg.ip || "";
-    $("#tv-port").value = s.cfg.port || TV_DEFAULT_PORTS[s.cfg.protocol || "adb"];
-    $("#tv-protocol-hint").textContent = TV_HINTS[$("#tv-protocol").value] || "";
-    if (!s.adb_installed && s.protocol === "adb") {
-      $("#tv-status").textContent = "状态：中枢未安装 adb（Docker 镜像已内置，本机试跑需自行安装）";
-    } else {
-      $("#tv-status").textContent = s.online ? "状态：已连接 " + s.serial : "状态：未连接";
-    }
+    if (id) await api("/api/devices/tv/" + encodeURIComponent(id), { method: "PUT", body });
+    else await api("/api/devices/tv", { method: "POST", body });
+    $("#dev-form").hidden = true;
+    $("#dev-form").dataset.id = "";
+    await loadDevices();
+    devMsg("已保存");
   } catch (e) {
-    $("#tv-status").textContent = "加载失败：" + e.message;
+    devMsg("保存失败：" + e.message);
   }
 });
 
-$("#tv-close").addEventListener("click", () => { $("#tv-sheet").hidden = true; });
-
-$("#tv-save").addEventListener("click", async () => {
-  try { await tvSave(); toast("已保存"); }
-  catch (e) { $("#tv-status").textContent = "保存失败：" + e.message; }
+/* 遥控台顶部：切换这次控制哪台设备 */
+$("#sel-pc").addEventListener("change", () => {
+  state.targets.pc = $("#sel-pc").value;
+  saveTargets();
+});
+$("#sel-tv").addEventListener("change", () => {
+  state.targets.tv = $("#sel-tv").value;
+  saveTargets();
 });
 
-$("#tv-test").addEventListener("click", async () => {
+/* 编辑模式：把当前选择存成这个面板的默认目标 */
+$("#btn-save-target").addEventListener("click", async () => {
+  if (!state.profile) return;
+  state.profile.targets = { pc: state.targets.pc, tv: state.targets.tv };
   try {
-    await tvSave();
-    $("#tv-status").textContent = "连接中…（首次连接请在电视上确认授权）";
-    const r = await api("/api/tv/connect", { method: "POST" });
-    $("#tv-status").textContent = (r.ok ? "已连接： " : "连接失败： ") + (r.msg || "");
+    await api("/api/profiles/" + state.profile.id, { method: "PUT", body: state.profile });
+    toast("已设为这个面板的默认目标");
   } catch (e) {
-    $("#tv-status").textContent = "连接失败：" + e.message;
+    toast("保存失败：" + e.message);
   }
 });
 
@@ -282,13 +489,17 @@ async function openProfile(id, edit) {
     return;
   }
   state.editing = edit;
+  state.targets = loadTargets(state.profile);
   $("#profile-title").textContent = state.profile.name || id;
   $("#btn-toggle-edit").textContent = edit ? "使用" : "编辑";
   $("#edit-tools").hidden = !edit;
+  $("#btn-save-target").hidden = !edit;
   $("#cfg").hidden = true;
   closeWs();
   renderStage();
   show("view-remote");
+  await loadDevices();
+  renderDeviceBar();
   openWs();
   if (!edit && window.innerWidth < window.innerHeight) {
     // 竖屏玩手柄体验差，提示但不强制
@@ -298,7 +509,7 @@ async function openProfile(id, edit) {
 
 $("#btn-back").addEventListener("click", () => {
   if (state.editing && confirm("未保存的修改将丢失，返回？")) {} else if (state.editing) return;
-  closeWs(); loadProfiles(); show("view-profiles");
+  closeWs(); loadDevices(); loadProfiles(); show("view-profiles");
 });
 
 $("#btn-toggle-edit").addEventListener("click", () => {
@@ -307,6 +518,7 @@ $("#btn-toggle-edit").addEventListener("click", () => {
   $("#cfg").hidden = true;
   $("#btn-toggle-edit").textContent = state.editing ? "使用" : "编辑";
   $("#edit-tools").hidden = !state.editing;
+  $("#btn-save-target").hidden = !state.editing;
   renderStage();
 });
 
@@ -383,22 +595,22 @@ function bindUseButton(div, el) {
 function sendAction(el) {
   const a = el.action || {};
   if (a.type === "key") {
-    if (a.mode === "hold") send({ t: "key_down", key: a.key });
-    else send({ t: "key_tap", key: a.key, mods: a.mods || [] });
+    if (a.mode === "hold") sendT({ t: "key_down", key: a.key }, pcTarget(el));
+    else sendT({ t: "key_tap", key: a.key, mods: a.mods || [] }, pcTarget(el));
   } else if (a.type === "mouse_click") {
-    send({ t: "mouse_click", button: a.button || "left" });
+    sendT({ t: "mouse_click", button: a.button || "left" }, pcTarget(el));
   } else if (a.type === "media") {
-    send({ t: "media", action: a.action });
+    sendT({ t: "media", action: a.action }, pcTarget(el));
   } else if (a.type === "adb_key") {
-    send({ t: "adb", action: { kind: "key", key: a.key } });
+    sendT({ t: "adb", action: { kind: "key", key: a.key } }, tvTarget(el));
   } else if (a.type === "adb_app") {
-    send({ t: "adb", action: { kind: "app", package: a.package } });
+    sendT({ t: "adb", action: { kind: "app", package: a.package } }, tvTarget(el));
   }
 }
 
 function sendUp(el) {
   const a = el.action || {};
-  if (a.type === "key" && a.mode === "hold") send({ t: "key_up", key: a.key });
+  if (a.type === "key" && a.mode === "hold") sendT({ t: "key_up", key: a.key }, pcTarget(el));
 }
 
 /* 触控板：单指移动=鼠标；单指轻点=左键；双指移动=滚动；双指轻点=右键 */
@@ -414,10 +626,10 @@ function bindTouchpad(div) {
     const p = pointers.get(e.pointerId);
     if (!p) return;
     if (pointers.size === 1) {
-      send({ t: "mouse_move", dx: Math.round(e.clientX - p.x), dy: Math.round(e.clientY - p.y) });
+      sendT({ t: "mouse_move", dx: Math.round(e.clientX - p.x), dy: Math.round(e.clientY - p.y) }, state.targets.pc);
     } else if (pointers.size === 2) {
       const dy = Math.round((e.clientY - p.y) / 10);
-      if (dy) send({ t: "scroll", dy });
+      if (dy) sendT({ t: "scroll", dy }, state.targets.pc);
     }
     p.x = e.clientX; p.y = e.clientY;
   });
@@ -429,7 +641,7 @@ function bindTouchpad(div) {
     const dist = Math.hypot(e.clientX - p.sx, e.clientY - p.sy);
     if (dt < 250 && dist < 12) {
       vibrate(8);
-      send({ t: "mouse_click", button: pointers.size >= 1 ? "right" : "left" });
+      sendT({ t: "mouse_click", button: pointers.size >= 1 ? "right" : "left" }, state.targets.pc);
     }
   };
   div.addEventListener("pointerup", up);
@@ -543,6 +755,8 @@ function renderCfg() {
         <option value="round" ${el.shape === "round" ? "selected" : ""}>圆形</option>
       </select></div>
     </div>
+    ${el.type === "button" ? `<div class="row"><div><label>目标设备（留空跟随顶部切换）</label>
+      <select id="c-target">${targetOptions(el.target || "")}</select></div></div>` : ""}
     ${actionHtml}
     <div class="row-actions">
       <button id="c-del" class="danger">删除元素</button>
@@ -580,6 +794,10 @@ function renderCfg() {
   on("#c-h", "input", () => { el.h = clamp(+$("#c-h").value || 10, 4, 100); });
   on("#c-color", "change", () => { el.color = $("#c-color").value; renderStage(); });
   on("#c-shape", "change", () => { el.shape = $("#c-shape").value; renderStage(); });
+  on("#c-target", "change", () => {
+    const v = $("#c-target").value;
+    if (v) el.target = v; else delete el.target;
+  });
   if (el.type === "button") {
     const writeAction = () => {
       const t = $("#c-type").value;
@@ -608,7 +826,19 @@ function openWs() {
     try {
       const msg = JSON.parse(ev.data);
       if (msg.t === "agent_status") setAgentDot(msg.online);
-      if (msg.t === "error" && msg.msg === "agent_offline") toast("PC Agent 未连接");
+      if (msg.t === "devices") {
+        state.devices = { pcs: msg.pcs || [], tvs: msg.tvs || [] };
+        renderDeviceBar();
+        if (!$("#dev-sheet").hidden) renderDeviceList();
+      }
+      if (msg.t === "error") {
+        if (msg.msg === "target_offline") {
+          const who = msg.target ? pcName(msg.target) : "目标设备";
+          toast(who + " 离线");
+        } else if (msg.msg === "agent_offline") {
+          toast("没有电脑在线，先在被控电脑上启动 Agent");
+        }
+      }
       if (msg.t === "tv_result" && !msg.ok) toast(msg.msg || "电视指令失败");
     } catch (_) {}
   };
@@ -652,6 +882,7 @@ document.addEventListener("gesturestart", (e) => e.preventDefault());
     try {
       const r = await api("/api/ping");
       setAgentDot(r.agent_online);
+      await loadDevices();
       await loadProfiles();
       show("view-profiles");
       return;

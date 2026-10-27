@@ -24,12 +24,20 @@ def ok(name):
 
 
 async def recv_json(ws, timeout=3):
-    return json.loads(await asyncio.wait_for(ws.recv(), timeout))
+    while True:
+        msg = json.loads(await asyncio.wait_for(ws.recv(), timeout))
+        if msg.get("t") == "ping":
+            continue
+        return msg
+
+
+AID = "pc-release-test"
 
 
 async def main():
     print("== 单设备断线释放回归 ==")
-    async with websockets.connect(f"{URL}/ws/agent?token={TOKEN}") as agent, \
+    async with websockets.connect(
+            f"{URL}/ws/agent?token={TOKEN}&id={AID}&name=断线测试机") as agent, \
                websockets.connect(f"{URL}/ws/remote?token={TOKEN}") as ra, \
                websockets.connect(f"{URL}/ws/remote?token={TOKEN}") as rb:
         # 清掉两台远端的初始 agent_status（中枢不给 Agent 推状态）
@@ -37,7 +45,7 @@ async def main():
         await recv_json(rb)
 
         # A 按住 W
-        await ra.send(json.dumps({"t": "key_down", "key": "w"}))
+        await ra.send(json.dumps({"t": "key_down", "key": "w", "target": AID}))
         assert (await recv_json(agent))["key"] == "w"
         ok("A key_down 转发到 Agent")
 
@@ -48,7 +56,7 @@ async def main():
         ok("A 断线 -> Agent 收到 key_up w（而非 release_all）")
 
         # B 仍在线，再按住 S
-        await rb.send(json.dumps({"t": "key_down", "key": "s"}))
+        await rb.send(json.dumps({"t": "key_down", "key": "s", "target": AID}))
         assert (await recv_json(agent))["key"] == "s"
         ok("B 不受影响，key_down 正常转发")
 

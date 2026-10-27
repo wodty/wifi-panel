@@ -25,7 +25,7 @@
   <header class="bar">
     <span class="bar-title">面板列表</span>
     <span id="agent-dot" class="dot off"></span>
-    <button id="btn-tv" class="ghost small">电视</button>
+    <button id="btn-devices" class="ghost small">设备</button>
     <button id="btn-logout" class="ghost small">换令牌</button>
   </header>
   <div id="profile-list" class="list"></div>
@@ -33,29 +33,43 @@
     <button id="btn-new" class="primary">+ 新建面板</button>
   </div>
 
-  <div id="tv-sheet" hidden>
+  <div id="dev-sheet" hidden>
     <div class="tv-box">
-      <button class="ghost small close" id="tv-close">收起</button>
-      <h3>电视设置</h3>
-      <div class="row">
-        <div><label>电视协议</label>
-          <select id="tv-protocol">
-            <option value="adb">Android TV 系（小米/TCL雷鸟/海信/创维/索尼等）</option>
-            <option value="samsung">三星 Tizen</option>
-            <option value="lg">LG webOS</option>
-          </select>
+      <button class="ghost small close" id="dev-close">收起</button>
+      <h3>设备</h3>
+      <p class="hint left">电脑装上 Agent 后自动出现在这里；电视点「添加电视」填 IP 就行。同一个面板可以同时管多台设备。</p>
+      <div id="dev-list" class="dev-list"></div>
+
+      <div class="row-actions">
+        <button id="dev-add-tv" class="primary">+ 添加电视</button>
+        <button id="dev-refresh">刷新状态</button>
+      </div>
+
+      <div id="dev-form" hidden>
+        <div class="row">
+          <div><label>名称</label><input id="dev-name" placeholder="客厅电视" maxlength="24"></div>
+        </div>
+        <div class="row">
+          <div><label>协议</label>
+            <select id="dev-proto">
+              <option value="adb">Android TV 系（小米 / TCL·雷鸟 / 海信 / 创维 / 索尼等）</option>
+              <option value="samsung">三星 Tizen</option>
+              <option value="lg">LG webOS</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div><label>IP</label><input id="dev-ip" placeholder="192.168.1.50" inputmode="decimal"></div>
+          <div><label>端口</label><input id="dev-port" type="number" value="5555"></div>
+        </div>
+        <p id="dev-proto-hint" class="hint left"></p>
+        <div class="row-actions">
+          <button id="dev-save" class="primary">保存</button>
+          <button id="dev-cancel">取消</button>
         </div>
       </div>
-      <div class="row">
-        <div><label>电视 IP</label><input id="tv-ip" placeholder="192.168.1.50" inputmode="decimal"></div>
-        <div><label>端口</label><input id="tv-port" type="number" value="5555"></div>
-      </div>
-      <div class="row-actions">
-        <button id="tv-save" class="primary">保存</button>
-        <button id="tv-test">连接测试</button>
-      </div>
-      <p id="tv-status" class="hint"></p>
-      <p id="tv-protocol-hint" class="hint"></p>
+
+      <p id="dev-msg" class="hint left"></p>
     </div>
   </div>
 
@@ -63,7 +77,7 @@
     <div class="tv-box">
       <button class="ghost small close" id="tpl-close">收起</button>
       <h3>新建面板</h3>
-      <p class="hint left">选一个模板开始，之后按钮位置和动作都能改。</p>
+      <p class="hint left">选一个模板开始，之后按钮位置和动作都能改。建好以后在顶部选它控制哪台电脑 / 电视。</p>
       <div id="tpl-list" class="tpl-list"></div>
     </div>
   </div>
@@ -76,6 +90,13 @@
     <span id="ws-dot" class="dot off"></span>
     <button id="btn-toggle-edit" class="ghost small">编辑</button>
   </header>
+
+  <div id="dev-bar" class="dev-bar">
+    <label class="dev-chip"><span>电脑</span><select id="sel-pc"></select></label>
+    <label class="dev-chip"><span>电视</span><select id="sel-tv"></select></label>
+    <button id="btn-save-target" class="small ghost" hidden>设为默认</button>
+  </div>
+
   <div id="edit-tools" hidden>
     <button data-add="button">+ 按钮</button>
     <button data-add="touchpad">+ 触控板</button>

@@ -40,6 +40,7 @@ jobs:
           python tests/test_tv.py
           python tests/test_release_per_remote.py
           python tests/test_templates.py
+          python tests/test_multi_device.py
       - name: 失败时打印中枢日志
         if: failure()
         run: cat /tmp/hub.log

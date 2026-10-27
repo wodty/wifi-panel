@@ -18,6 +18,7 @@
 - **电视多协议**：Android TV 系走 ADB，三星 Tizen 与 LG webOS 走各自的原生 WebSocket 协议，主流品牌基本覆盖。
 - **不依赖 PC 开机控电视**：电视指令由中枢（NAS 上）直接执行，电脑关着也能用手机换台、调音量。
 - **PC 端零端口**：Agent 主动外连中枢，电脑不用开端口、不用动防火墙，放在任何内网机器上都能接。
+- **多电脑多电视**：几台电脑、几台电视各起一个名字，面板顶部随时切换控制目标；也可以一键广播——「关掉所有电视」「所有电脑静音」。
 - **防按键卡死**：手机断线、切后台、来电话时，中枢会释放该设备按住的全部按键，不会出现「一直往前走」。
 - **安卓 App**：可选安装。WebView 壳 + 记住中枢地址、屏幕常亮、切后台自动断开，面板页面仍然由中枢托管，升级中枢 App 不用重装。
 - **零前端依赖**：手机端是原生 JS 单页，无需构建、无需安装 App。
@@ -166,12 +167,31 @@ PANEL_TOKEN=你的密码 python -m uvicorn server.main:app --host 0.0.0.0 --port
 
 ```bash
 pip install -r agent/requirements.txt
-python agent/agent.py ws://<中枢IP>:8765/ws/agent <你的密码>
+python agent/agent.py ws://<中枢IP>:8765/ws/agent <你的密码> --name 客厅主机
 ```
 
-Windows 可直接双击 `agent/start_agent.bat`（**先在文件开头把 `HUB` 改成中枢地址**）。
+- `--name` 是这台电脑在手机上显示的名字（默认取主机名），建议每台电脑起不一样的名字
+- 设备 id 首次运行自动生成，存在 `agent/.agent_id`，重启不变；想换一台“身份”删掉这个文件即可
+- Windows 可直接双击 `agent/start_agent.bat`（**先在文件开头把 `HUB` / `TOKEN` / `NAME` 改好**）
 
-开机自启（Windows）：把编辑好的 `start_agent.bat` 快捷方式放进 `shell:startup` 目录。
+**Windows 开机自启（后台无窗口）**
+
+先双击 `agent/start_agent.bat` 调试，确认能连上、能控鼠标键盘，再配自启。
+
+*方式 A · 计划任务（推荐）*：编辑好 `start_agent.bat` 后，右键「以管理员身份运行」`agent/install_autostart.bat`。它注册一个登录时触发的计划任务，通过 `start_agent_hidden.vbs` 静默拉起 Agent——无黑窗口、不弹框。卸载运行 `agent/uninstall_autostart.bat`。
+
+*方式 B · 启动文件夹*：`Win + R` 输入 `shell:startup` 回车，把 `agent/start_agent_hidden.vbs` 的快捷方式放进去。效果与方式 A 相同，随当前用户登录启动。
+
+*方式 C · 注册成 Windows 服务（NSSM）*：服务在登录前就能启动、崩溃自动拉起，适合常驻。但注意：**Agent 不适合用服务方式跑**——Windows 服务运行在 Session 0，碰不到你桌面会话的鼠标键盘，注入会静默失效。服务方式适合跑的是「中枢」：
+
+```text
+# 管理员命令行，nssm 从 https://nssm.cc 下载后加入 PATH
+nssm install wifi-panel-hub "C:\wifi-panel\.venv\Scripts\python.exe" "-m uvicorn server.main:app --host 0.0.0.0 --port 8765"
+nssm set wifi-panel-hub AppDirectory "C:\wifi-panel"
+nssm set wifi-panel-hub AppEnvironmentExtra PANEL_TOKEN=你的密码
+nssm start wifi-panel-hub
+rem 卸载：nssm stop wifi-panel-hub && nssm remove wifi-panel-hub confirm
+```
 
 **权限说明**
 
@@ -211,7 +231,7 @@ App 只是个 WebView 壳，不打包面板页面——中枢升级了新功能�
 
 ### 五、电视端
 
-手机上面板列表右上角「电视」→ 选协议 → 填电视 IP（端口自动带出）→ 保存 → 连接测试。然后新建「电视遥控」模板面板。
+手机上面板列表右上角「设备」→「+ 添加电视」→ 选协议 → 填电视 IP（端口自动带出）→ 保存 → 点「测试」连接。然后新建「电视遥控」模板面板。
 
 **ADB 系（小米 / TCL·雷鸟 / 海信 / 创维 / 索尼 / 长虹 / 康佳）**
 
@@ -224,6 +244,24 @@ App 只是个 WebView 壳，不打包面板页面——中枢升级了新功能�
 **LG webOS**：首次连接电视屏幕弹出「允许」，确认后配对密钥自动保存。
 
 > 电视控制的安全性：ADB 端口长期开放存在被内网其他设备利用的风险。建议在路由器上只允许中枢 IP 访问电视对应端口，或不用时关闭网络调试。
+
+---
+
+### 六、多台电脑 / 多台电视
+
+**加设备**：面板列表右上角「设备」——电脑装好 Agent 会自动出现（点「改名」起个好认的名字）；电视点「+ 添加电视」，有几台加几台，每台各自的协议、IP、配对凭证独立保存，两台三星 / 两台 LG 互不干扰。
+
+**控制谁**：打开任一面板，顶部有两个下拉：
+
+- 「电脑」「电视」默认是「自动」——各挑第一台在线的设备
+- 随时切换成指定设备，比如面板不动、把电视从客厅切到卧室
+- 选「全部电脑 / 全部电视」就是广播：一条「电源」关掉所有电视，一条「静音」全屋静音
+
+**记住绑定**：编辑模式下顶栏会出现「设为默认」，把当前选择存成这个面板的默认目标——给每个房间各复制一份面板，客厅面板管客厅、卧室面板管卧室。
+
+**单键跨设备**：编辑器里选中任意按钮，有个「目标设备」下拉，可以让某一个键固定打到指定设备——比如客厅面板里放一个「卧室电视电源」。
+
+**迁移**：老版本的单电视配置会在升级后自动变成设备表里的第一台，老面板、旧书签全部照常可用，不用做任何事。
 
 ---
 
@@ -256,20 +294,23 @@ App 只是个 WebView 壳，不打包面板页面——中枢升级了新功能�
 ```
 wifi-panel/
 ├── server/                 # 中枢：FastAPI + WebSocket
-│   ├── main.py             #   路由、中继、断线释放
+│   ├── main.py             #   路由、多设备中继、断线释放
+│   ├── devices.py          #   设备表（多台电脑 / 多台电视的注册与迁移）
 │   ├── templates.py        #   内置面板模板（唯一数据源）
-│   ├── tv.py               #   电视控制门面
+│   ├── tv.py               #   多电视管理（分发、每台一把锁、状态缓存）
 │   ├── tv_adb.py           #   ADB 后端
 │   ├── tv_samsung.py       #   三星 Tizen 后端
 │   ├── tv_lg.py            #   LG webOS 后端
-│   └── storage/            #   面板配置 / 电视密钥（运行时生成）
+│   └── storage/            #   面板配置 / 设备表 / 电视密钥（运行时生成）
 ├── agent/agent.py          # 被控电脑上的输入注入 Agent
 ├── web/                    # 手机端网页（原生 JS）
-├── tests/                  # 冒烟测试
+├── tests/                  # 冒烟测试 + 多设备测试
 ├── Dockerfile
 ├── docker-compose.yml
-├── start_hub.bat           # Windows 一键启动中枢
-└── agent/start_agent.bat   # Windows 一键启动 Agent
+├── start_hub.bat                    # Windows 一键启动中枢
+├── agent/start_agent.bat            # Windows 一键启动 Agent（前台调试）
+├── agent/start_agent_hidden.vbs     # Agent 静默启动（无窗口）
+└── agent/install_autostart.bat      # 注册开机自启计划任务
 ```
 
 ## 许可
