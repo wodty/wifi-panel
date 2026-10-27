@@ -1,0 +1,11 @@
+services:
+  panel:
+    build: .
+    container_name: wifi-panel
+    ports:
+      - "8765:8765"
+    environment:
+      - PANEL_TOKEN=change-me-please   # 部署前务必修改！
+    volumes:
+      - ./server/storage:/app/server/storage   # 布局持久化
+    restart: unless-stopped

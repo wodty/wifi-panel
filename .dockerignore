@@ -1,0 +1,8 @@
+# 不把密钥/配置/运行时数据打进镜像（compose 会以卷挂载它们）
+server/storage
+**/__pycache__
+*.pyc
+tests
+agent
+*.md
+*.bat

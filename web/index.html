@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>wifi-panel</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<section id="view-connect">
+  <div class="card">
+    <h1>wifi-panel</h1>
+    <p class="hint">手机浏览器控制 PC 与电视的可编程面板</p>
+    <input id="token-input" type="password" placeholder="访问令牌 (token)" autocomplete="off">
+    <button id="btn-connect" class="primary">连接</button>
+    <p id="connect-err" class="err"></p>
+  </div>
+</section>
+
+<section id="view-profiles" hidden>
+  <header class="bar">
+    <span class="bar-title">面板列表</span>
+    <span id="agent-dot" class="dot off"></span>
+    <button id="btn-tv" class="ghost small">电视</button>
+    <button id="btn-logout" class="ghost small">换令牌</button>
+  </header>
+  <div id="profile-list" class="list"></div>
+  <div class="fab-row">
+    <button id="btn-new" class="primary">+ 新建面板</button>
+  </div>
+
+  <div id="tv-sheet" hidden>
+    <div class="tv-box">
+      <button class="ghost small close" id="tv-close">收起</button>
+      <h3>电视设置</h3>
+      <div class="row">
+        <div><label>电视协议</label>
+          <select id="tv-protocol">
+            <option value="adb">Android TV 系（小米/TCL雷鸟/海信/创维/索尼等）</option>
+            <option value="samsung">三星 Tizen</option>
+            <option value="lg">LG webOS</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div><label>电视 IP</label><input id="tv-ip" placeholder="192.168.1.50" inputmode="decimal"></div>
+        <div><label>端口</label><input id="tv-port" type="number" value="5555"></div>
+      </div>
+      <div class="row-actions">
+        <button id="tv-save" class="primary">保存</button>
+        <button id="tv-test">连接测试</button>
+      </div>
+      <p id="tv-status" class="hint"></p>
+      <p id="tv-protocol-hint" class="hint"></p>
+    </div>
+  </div>
+
+  <div id="tpl-sheet" hidden>
+    <div class="tv-box">
+      <button class="ghost small close" id="tpl-close">收起</button>
+      <h3>新建面板</h3>
+      <p class="hint left">选一个模板开始，之后按钮位置和动作都能改。</p>
+      <div id="tpl-list" class="tpl-list"></div>
+    </div>
+  </div>
+</section>
+
+<section id="view-remote" hidden>
+  <header class="bar">
+    <button id="btn-back" class="ghost small">← 返回</button>
+    <span id="profile-title" class="bar-title"></span>
+    <span id="ws-dot" class="dot off"></span>
+    <button id="btn-toggle-edit" class="ghost small">编辑</button>
+  </header>
+  <div id="edit-tools" hidden>
+    <button data-add="button">+ 按钮</button>
+    <button data-add="touchpad">+ 触控板</button>
+    <button id="btn-save" class="primary">保存</button>
+  </div>
+  <div id="stage"></div>
+  <div id="cfg" class="sheet" hidden></div>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>

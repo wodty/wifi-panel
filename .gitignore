@@ -1,0 +1,19 @@
+# 运行时数据：面板配置、电视 IP、ADB 私钥 / 配对令牌，绝不能提交
+server/storage/*
+!server/storage/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# 环境与本地配置
+.env
+.env.*
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini
