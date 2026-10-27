@@ -1,0 +1,40 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'io.github.wodty.wifipanel'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "io.github.wodty.wifipanel"
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // 这个是自用工具，release 也用 debug 签名，装得上、能直接覆盖升级
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+    }
+
+    // 产物统一叫 wifi-panel.apk，方便直接扔进 Release
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            outputFileName = "wifi-panel-${variant.versionName}.apk"
+        }
+    }
+}

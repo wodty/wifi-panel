@@ -659,3 +659,18 @@ document.addEventListener("gesturestart", (e) => e.preventDefault());
   }
   show("view-connect");
 })();
+
+/* ---------- 切后台：主动断开，防止按键卡住 ---------- */
+// 手机切后台、锁屏、来电话时，长连接会被系统慢慢冻结，按住的键就卡在中枢那边。
+// 这里直接断开，中枢收到断开就会释放这台设备的全部按键；回到前台自动重连。
+function wsWanted() { return !!state.profile && !state.editing && !state.ws; }
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) closeWs();
+  else if (wsWanted()) openWs();
+});
+window.addEventListener("pagehide", () => closeWs());
+
+// 给安卓外壳（WebView）调的钩子，行为和上面的 visibilitychange 一致
+window.__wpPause = closeWs;
+window.__wpResume = () => { if (wsWanted()) openWs(); };
