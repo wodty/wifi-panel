@@ -165,6 +165,7 @@ def handle(msg: dict) -> None:
 
 
 async def agent_loop() -> None:
+    asyncio.get_running_loop().set_exception_handler(_quiet_exception_handler)
     url = (f"{HUB}?token={quote(TOKEN)}&id={quote(AGENT_ID)}"
            f"&name={quote(NAME)}&platform={quote(platform.platform()[:60])}")
     backoff = 1
@@ -199,6 +200,14 @@ async def agent_loop() -> None:
         do_release_all()
         await asyncio.sleep(backoff)
         backoff = min(backoff * 2, 30)
+
+
+def _quiet_exception_handler(loop, context):
+    """Windows 上连不上中枢时 asyncio 会打一大屏 EOFError 堆栈，
+    反正下面会打印重连提示并自动重试，这种噪音直接吞掉。"""
+    if isinstance(context.get("exception"), EOFError):
+        return
+    loop.default_exception_handler(context)
 
 
 if __name__ == "__main__":
