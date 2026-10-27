@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional, Set
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -79,6 +80,15 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="wifi-panel", lifespan=lifespan)
+
+# 页面可以不在中枢上（例如本地打开一份网页、或从旧书签指到新 NAS）：
+# 放开跨域，鉴权仍靠 X-Token，浏览器读不到别人的令牌。
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class Hub:

@@ -13,9 +13,11 @@
   <div class="card">
     <h1>wifi-panel</h1>
     <p class="hint">手机浏览器控制 PC 与电视的可编程面板</p>
+    <input id="host-input" type="text" inputmode="url" placeholder="中枢地址，如 192.168.1.10:8765" autocomplete="off" autocapitalize="off" spellcheck="false">
     <input id="token-input" type="password" placeholder="访问令牌 (token)" autocomplete="off">
     <button id="btn-connect" class="primary">连接</button>
     <p id="connect-err" class="err"></p>
+    <p class="hint">地址留空则连当前页面所在的中枢；也可以直接打开 <code>?host=IP:8765&amp;token=令牌</code> 免输入。</p>
   </div>
 </section>
 

@@ -7,7 +7,29 @@ const esc = (s) => String(s == null ? "" : s)
 const store = {
   get token() { return localStorage.getItem("panel_token") || ""; },
   set token(v) { localStorage.setItem("panel_token", v); },
+  // 中枢地址（host:port）。留空 = 用当前页面所在的地址
+  get host() { return localStorage.getItem("panel_host") || ""; },
+  set host(v) { localStorage.setItem("panel_host", v); },
 };
+
+/** 把用户输入整理成 host:port：去掉协议头、路径、尾部斜杠 */
+function normHost(raw) {
+  let h = String(raw == null ? "" : raw).trim();
+  if (!h) return "";
+  h = h.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");   // http:// https:// ws://
+  h = h.split(/[/?#]/)[0];                          // 丢掉路径与查询串
+  h = h.replace(/\/+$/, "");
+  return h;
+}
+
+/** 当前中枢的基地址；没有显式配置时走同源（相对路径） */
+function hubBase() {
+  return store.host ? `http://${store.host}` : "";
+}
+
+function hubHost() {
+  return store.host || location.host;
+}
 
 const state = {
   profiles: [],
@@ -32,28 +54,65 @@ async function api(path, opts = {}) {
     opts.body = JSON.stringify(opts.body);
     opts.headers["Content-Type"] = "application/json";
   }
-  const res = await fetch(path, opts);
+  const res = await fetch(hubBase() + path, opts);
   if (res.status === 401) throw new Error("unauthorized");
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
   return res.json();
 }
 
 /* ---------- 连接页 ---------- */
+async function pingHub() {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 6000);
+  try {
+    return await api("/api/ping", { signal: ctl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 $("#btn-connect").addEventListener("click", async () => {
   const t = $("#token-input").value.trim();
-  if (!t) return;
+  const h = normHost($("#host-input").value);
+  const err = $("#connect-err");
+  err.textContent = "";
+  if (!t) { err.textContent = "请填写访问令牌"; return; }
+  if (!h && location.protocol === "file:") {
+    err.textContent = "请填写中枢地址（当前页面不是从中枢打开的）";
+    return;
+  }
+  // 和当前页面同源就存空串，省掉一次跨域
+  store.host = h && h !== location.host ? h : "";
   store.token = t;
   try {
-    await api("/api/ping");
+    await pingHub();
     await loadProfiles();
     show("view-profiles");
   } catch (e) {
-    $("#connect-err").textContent = e.message === "unauthorized" ? "令牌错误" : "无法连接服务: " + e.message;
+    let msg;
+    if (e.name === "AbortError") msg = "连接超时：地址不通，或中枢没启动";
+    else if (e instanceof TypeError) msg = "地址不通：检查 IP 和端口是否正确、中枢是否已启动";
+    else if (e.message === "unauthorized") msg = "令牌错误";
+    else msg = "无法连接服务: " + e.message;
+    err.textContent = msg;
   }
 });
 
+/* 回填上次的连接信息；带 ?host=&token= 时直接连 */
+(function initConnect() {
+  const q = new URLSearchParams(location.search);
+  const qh = normHost(q.get("host"));
+  const qt = (q.get("token") || "").trim();
+  if (qh) store.host = qh;
+  if (qt) store.token = qt;
+  $("#host-input").value = store.host || (location.protocol === "file:" ? "" : location.host);
+  if (store.token) $("#token-input").value = store.token;
+  if (qh && qt) $("#btn-connect").click();
+})();
+
 $("#btn-logout").addEventListener("click", () => {
   store.token = "";
+  $("#host-input").value = store.host || (location.protocol === "file:" ? "" : location.host);
   show("view-connect");
 });
 
@@ -541,7 +600,7 @@ function renderCfg() {
 function openWs() {
   closeWs();
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${location.host}/ws/remote?token=${encodeURIComponent(store.token)}`);
+  const ws = new WebSocket(`${proto}://${hubHost()}/ws/remote?token=${encodeURIComponent(store.token)}`);
   state.ws = ws;
   ws.onopen = () => $("#ws-dot").classList.replace("off", "on");
   ws.onclose = () => { $("#ws-dot").classList.replace("on", "off"); };
