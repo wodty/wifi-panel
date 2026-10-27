@@ -52,10 +52,22 @@ def main():
     assert all(0 <= e["x"] <= 100 and 0 <= e["y"] <= 100
                and 0 < e["x"] + e["w"] <= 100 and 0 < e["y"] + e["h"] <= 100 for e in els)
     # 每个按钮都有合法动作
+    acts = []
     for e in els:
         if e["type"] == "button":
-            assert e.get("action", {}).get("type") in {"key", "mouse_click", "media", "adb_key", "adb_app"}
-    ok("默认面板 24 元素：坐标合法、动作齐全")
+            t = e.get("action", {}).get("type")
+            assert t in {"key", "mouse_click", "media", "adb_key", "adb_app"}
+            acts.append(t)
+    ok(f"默认面板 {len(els)} 元素：坐标合法、动作齐全")
+
+    # 默认面板必须同时覆盖 PC 与电视（曾经只有 PC 键，用户反馈缺失）
+    assert prof.get("template_rev") == 2, prof.get("template_rev")
+    assert "key" in acts and "mouse_click" in acts, acts
+    tv_keys = {e["action"]["key"] for e in els
+               if e.get("action", {}).get("type") == "adb_key"}
+    need = {"dpad_up", "dpad_down", "dpad_left", "dpad_right", "ok", "back", "home", "volume_up", "volume_down"}
+    assert need <= tv_keys, f"缺少电视键: {need - tv_keys}"
+    ok(f"默认面板含电视遥控 {len(tv_keys)} 键（方向环/OK/返回/桌面/音量）")
 
     # 实例化与清理
     code, r = req("POST", "/api/templates/gamepad", {})

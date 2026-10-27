@@ -10,6 +10,9 @@ from typing import Optional
 # 默认模板：新用户第一次打开就能用，不需要自己拖按钮
 DEFAULT_KIND = "universal"
 
+# 模板版本：升级内置模板时 +1，服务端会据此刷新「未被用户改过」的默认面板
+REV = 2
+
 # 配色（低饱和深色底上的可读色）
 C_BLUE = "#378add"    # 常规功能键
 C_GREEN = "#639922"   # 确认类（Enter）
@@ -18,6 +21,7 @@ C_GRAY = "#888780"    # 次要键（Esc / Tab / 翻页）
 C_BROWN = "#854f0b"   # 鼠标
 C_RED = "#e24b4a"     # 破坏性/静音
 C_TEAL = "#1f8a8a"    # 媒体
+C_ORANGE = "#b4652f"  # 电视（和 PC 键在配色上分开）
 
 
 def _btn(eid, label, x, y, w, h, action, color=C_BLUE, shape="rect"):
@@ -49,46 +53,51 @@ def _touchpad(eid, x=0, y=0, w=100, h=40):
 
 
 # ---------- 通用（默认）----------
-# 上半屏触控板（单指移动、轻点左键、双指滚动/右键），
-# 下半屏 5 列网格：常用键 / 组合键 / 窗口导航 / 媒体
+# 竖屏全屏一张面板，一块屏幕同时管 PC 和电视：
+#   顶部触控板（单指移动、轻点左键、双指滚动/右键）
+#   鼠标三键 → PC 常用键 3 行 → 电视遥控 2 行（橙色，与 PC 键区分）
 _COLS = (2, 22, 42, 62, 82)
 _CW = 18
 
 
 def universal() -> list:
-    els = [_touchpad("u_tp", h=40)]
+    els = [_touchpad("u_tp", h=33)]
 
     # 三键鼠标：触控板轻点已经能左键，这里补显式按键（含中键）
     els += [
-        _btn("u_m0", "左键", 2, 42, 30, 8, _mouse("left"), C_BROWN),
-        _btn("u_m1", "中键", 35, 42, 30, 8, _mouse("middle"), C_BROWN),
-        _btn("u_m2", "右键", 68, 42, 30, 8, _mouse("right"), C_BROWN),
+        _btn("u_m0", "左键", 2, 34, 30, 7, _mouse("left"), C_BROWN),
+        _btn("u_m1", "中键", 35, 34, 30, 7, _mouse("middle"), C_BROWN),
+        _btn("u_m2", "右键", 68, 34, 30, 7, _mouse("right"), C_BROWN),
     ]
 
     rows = [
-        # 基础编辑
+        # PC · 基础编辑
         [("Esc", _k("esc"), C_GRAY), ("Tab", _k("tab"), C_GRAY),
          ("Enter", _k("enter"), C_GREEN), ("退格", _k("backspace"), C_GRAY),
          ("空格", _k("space"), C_BLUE)],
-        # 高频组合键
+        # PC · 高频组合键
         [("复制", _k("c", mods=["ctrl"]), C_PURPLE), ("粘贴", _k("v", mods=["ctrl"]), C_PURPLE),
          ("撤销", _k("z", mods=["ctrl"]), C_PURPLE), ("全选", _k("a", mods=["ctrl"]), C_PURPLE),
-         ("查找", _k("f", mods=["ctrl"]), C_PURPLE)],
-        # 窗口与翻页
-        [("Alt+Tab", _k("tab", mods=["alt"]), C_PURPLE), ("Win", _k("cmd"), C_PURPLE),
-         ("上页", _k("page_up"), C_GRAY), ("下页", _k("page_down"), C_GRAY),
-         ("删除", _k("delete"), C_GRAY)],
-        # 媒体（走系统媒体键，不模拟键盘）
-        [("音量-", _media("volume_down"), C_TEAL), ("音量+", _media("volume_up"), C_TEAL),
-         ("静音", _media("mute"), C_RED), ("上一首", _k("media_previous"), C_TEAL),
-         ("下一首", _k("media_next"), C_TEAL)],
+         ("Alt+Tab", _k("tab", mods=["alt"]), C_PURPLE)],
+        # PC · 窗口与翻页
+        [("上页", _k("page_up"), C_GRAY), ("下页", _k("page_down"), C_GRAY),
+         ("删除", _k("delete"), C_GRAY), ("静音", _media("mute"), C_TEAL),
+         ("Win", _k("cmd"), C_PURPLE)],
+        # 电视 · 方向环
+        [("◀", _adb("dpad_left"), C_ORANGE), ("▲", _adb("dpad_up"), C_ORANGE),
+         ("OK", _adb("ok"), C_GREEN), ("▼", _adb("dpad_down"), C_ORANGE),
+         ("▶", _adb("dpad_right"), C_ORANGE)],
+        # 电视 · 返回与音量（电源不放默认面板，避免误触关机）
+        [("返回", _adb("back"), C_GRAY), ("桌面", _adb("home"), C_GRAY),
+         ("菜单", _adb("menu"), C_GRAY), ("音量-", _adb("volume_down"), C_ORANGE),
+         ("音量+", _adb("volume_up"), C_ORANGE)],
     ]
-    y = 52.0
-    row_h = 10.5
+    y = 42.5
+    row_h = 10.0
     for ri, row in enumerate(rows):
         for ci, (label, action, color) in enumerate(row):
             els.append(_btn(f"u{ri}{ci}", label, _COLS[ci], round(y, 1), _CW, row_h, action, color))
-        y += row_h + 1.0
+        y += row_h + 0.8
     return els
 
 
@@ -139,7 +148,7 @@ def blank() -> list:
 
 
 TEMPLATES = [
-    {"kind": "universal", "name": "通用", "desc": "鼠标 + 常用快捷键 + 媒体，默认推荐", "build": universal},
+    {"kind": "universal", "name": "通用", "desc": "PC 鼠标键盘 + 电视遥控，一块屏全管，默认推荐", "build": universal},
     {"kind": "gamepad", "name": "游戏手柄", "desc": "触控板 + WASD + 跳跃，横屏更佳", "build": gamepad},
     {"kind": "media", "name": "媒体控制", "desc": "音量、播放、窗口切换", "build": media},
     {"kind": "tv", "name": "电视遥控", "desc": "方向环 + 音量 + 返回（需先配电视）", "build": tv},
@@ -165,5 +174,6 @@ def build(kind: str, pid: str, name: Optional[str] = None) -> dict:
         "id": pid,
         "name": name or tpl["name"],
         "template": tpl["kind"],
+        "template_rev": REV,
         "elements": tpl["build"](),
     }

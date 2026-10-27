@@ -50,13 +50,26 @@ except ImportError:  # 直接以脚本方式运行时
 
 
 def seed_default_profile() -> None:
-    """首次启动（存储为空）时播种一个通用面板，打开就能用。"""
-    if any(LAYOUTS.glob("*.json")):
-        return
+    """播种/升级默认面板。
+
+    - 存储里一个面板都没有：写入内置默认面板，新用户打开就能用。
+    - 已有 default.json 但用户没改过、且模板版本较旧：按新模板重建。
+      （用户手动改过的面板不动，避免覆盖自定义内容）
+    """
+    path = LAYOUTS / "default.json"
+    exists = path.exists()
+    if not exists and any(LAYOUTS.glob("*.json")):
+        return  # 用户自己删掉了默认面板，不再塞回去
+    if exists:
+        try:
+            cur = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            cur = {}
+        old = int(cur.get("template_rev") or 0)
+        if cur.get("edited") or old >= templates.REV:
+            return
     data = templates.build(templates.DEFAULT_KIND, "default")
-    (LAYOUTS / "default.json").write_text(
-        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 @asynccontextmanager
@@ -179,6 +192,7 @@ async def put_profile(pid: str, request: Request):
     data["id"] = pid
     if not data.get("name"):
         data["name"] = pid
+    data["edited"] = True  # 标记为用户改过，内置模板升级时不再覆盖
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"ok": True}
 
