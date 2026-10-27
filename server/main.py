@@ -153,6 +153,12 @@ def ping(request: Request):
     return {"ok": True, "agent_online": hub.agent is not None}
 
 
+@app.get("/healthz")
+def healthz():
+    """容器健康检查用，不含任何鉴权信息。"""
+    return {"ok": True}
+
+
 @app.get("/api/profiles")
 def list_profiles(request: Request):
     check_token(request)

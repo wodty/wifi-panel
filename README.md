@@ -1,5 +1,7 @@
 # wifi-panel
 
+![docker](https://github.com/wodty/wifi-panel/actions/workflows/docker.yml/badge.svg)
+
 **把手机浏览器变成电脑的鼠标键盘，同时当电视遥控器用。** 面板上的按钮位置、大小、颜色、动作全部自定义——想做成游戏手柄、电视遥控，还是办公快捷键板，都随你。
 
 中枢跑在 NAS / 服务器的 Docker 里，电脑上只装一个几百 KB 的 Agent，手机上什么都不用装（浏览器打开即用）。
@@ -57,25 +59,78 @@
 
 ### 一、中枢：Docker 部署（推荐）
 
+镜像已发布在 GitHub Container Registry，支持 `linux/amd64` 与 `linux/arm64`（群晖 / 威联通 / x86 小主机 / ARM 板子都能跑），内置 `adb`，电视控制开箱可用。
+
 ```bash
 git clone https://github.com/wodty/wifi-panel.git
 cd wifi-panel
 ```
 
-先改令牌，再启动：
+先设令牌，再启动：
 
 ```bash
-# 编辑 docker-compose.yml，把 PANEL_TOKEN 改成你自己的密码
-docker compose up -d --build
+# 方式 A：写进 .env（推荐，compose 会自动读取）
+echo "PANEL_TOKEN=你的密码" > .env
+docker compose up -d
+
+# 方式 B：不用 .env，直接改 docker-compose.yml 里的 PANEL_TOKEN
 ```
 
-镜像内置了 `adb`，电视控制开箱可用。面板配置与电视配对密钥存在 `server/storage/`，已挂载为卷，升级重建容器不会丢。
+升级到最新版本：
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+面板配置、电视 IP、ADB 配对密钥都存在 `server/storage/`（已挂载为卷），升级重建容器不会丢。
+
+<details>
+<summary>不用 clone 仓库，最小启动</summary>
+
+把下面内容存成 `docker-compose.yml`，同目录执行 `docker compose up -d`：
+
+```yaml
+services:
+  panel:
+    image: ghcr.io/wodty/wifi-panel:latest
+    container_name: wifi-panel
+    ports: ["8765:8765"]
+    environment:
+      - PANEL_TOKEN=你的密码
+    volumes:
+      - ./server/storage:/app/server/storage
+    restart: unless-stopped
+```
+
+若拉取时报 `denied`，说明镜像包还是私有的，先 `docker login ghcr.io`（用户名 GitHub 账号，密码用 PAT）。
+</details>
 
 <details>
 <summary>群晖 / 威联通用户</summary>
 
-图形界面里新建「项目 / 应用」，选择本仓库目录的 `docker-compose.yml` 直接启动即可；也可以只 build 镜像后用向导映射端口 `8765` 与目录 `server/storage`。
+图形界面里新建「项目 / 应用」，镜像填 `ghcr.io/wodty/wifi-panel:latest`，端口映射 `8765`，目录映射 `server/storage`，环境变量填 `PANEL_TOKEN` 即可；也可以直接用本仓库的 `docker-compose.yml`。
 </details>
+
+<details>
+<summary>自己构建镜像（改了代码）</summary>
+
+```bash
+docker compose build && docker compose up -d
+```
+（把 `docker-compose.yml` 里的 `image:` 注释掉、放开 `build: .`，或直接 `docker build -t wifi-panel .`）
+</details>
+
+---
+
+### 镜像标签说明
+
+| 标签 | 含义 |
+|------|------|
+| `latest` | 跟随 `main` 分支最新提交 |
+| `1.0.0` / `1.0` | 打 `v1.0.0` 这类 git tag 时自动生成 |
+| `sha-xxxxxxx` | 某次提交的精确版本，适合锁定部署 |
+
+镜像构建与自动化测试由 GitHub Actions 完成（`.github/workflows/docker.yml`）。
 
 ---
 

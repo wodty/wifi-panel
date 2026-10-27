@@ -1,11 +1,18 @@
 services:
   panel:
-    build: .
+    # 直接拉官方镜像（amd64 / arm64 都能用）
+    image: ghcr.io/wodty/wifi-panel:latest
+
+    # 想改代码自己构建：注释掉上面 image，放开下面 build
+    # build: .
+
     container_name: wifi-panel
     ports:
       - "8765:8765"
     environment:
-      - PANEL_TOKEN=change-me-please   # 部署前务必修改！
+      # 面板访问令牌，建议在同目录 .env 里写 PANEL_TOKEN=你的口令
+      - PANEL_TOKEN=${PANEL_TOKEN:-change-me-please}
     volumes:
-      - ./server/storage:/app/server/storage   # 布局持久化
+      # 面板配置、电视 IP、ADB 配对密钥都存这里，重建容器不丢
+      - ./server/storage:/app/server/storage
     restart: unless-stopped
